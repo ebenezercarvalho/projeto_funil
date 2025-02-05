@@ -1,0 +1,75 @@
+import streamlit as st
+from supabase import create_client, Client
+import pandas as pd
+from dotenv import load_dotenv
+import os
+
+# Configuração inicial do Streamlit
+st.set_page_config(page_title="Dashboard de Qualidade", layout="wide")
+st.title("📊 Dashboard de Qualidade da Água")
+
+# Carregar variáveis de ambiente
+load_dotenv()
+
+# Configuração da Supabase
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+
+if not url or not key:
+    st.error("Erro: Supabase URL ou Key não encontradas nas variáveis de ambiente.")
+    st.stop()
+
+supabase: Client = create_client(url, key)
+
+# Credenciais do usuário na Supabase
+SUPABASE_EMAIL = os.getenv("SUPABASE_EMAIL")
+SUPABASE_PASSWORD = os.getenv("SUPABASE_PASSWORD")
+
+if not SUPABASE_EMAIL or not SUPABASE_PASSWORD:
+    st.error("Erro: Credenciais do usuário da Supabase não encontradas.")
+    st.stop()
+
+# Autenticação do usuário na Supabase
+try:
+    user = supabase.auth.sign_up({"email": SUPABASE_EMAIL, "password": SUPABASE_PASSWORD})
+except Exception:
+    user = supabase.auth.sign_in_with_password({"email": SUPABASE_EMAIL, "password": SUPABASE_PASSWORD})
+
+# Função para carregar dados da tabela 'qualidade'
+def carregar_dados():
+    try:
+        response = supabase.table("qualidade").select("*").execute()
+        if not response.data:
+            return pd.DataFrame()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        st.error(f"Erro ao acessar Supabase: {str(e)}")
+        return pd.DataFrame()
+
+# Verificação da conexão
+projeto_correto = url.startswith("https://") and "ebenezercarvalho" in url
+st.sidebar.markdown(f"🔗 Conexão com projeto: **{'Válida' if projeto_correto else 'Inválida'}**")
+
+# Carregar os dados
+df = carregar_dados()
+
+# Adicionar seletor de ano e mês no menu à direita
+anos_disponiveis = [2022, 2023, 2024]
+ano_selecionado = st.sidebar.selectbox("Selecione o Ano", anos_disponiveis)
+mes_selecionado = st.sidebar.selectbox("Selecione o Mês", list(range(1, 13)))
+
+# Converter 'Data Coleta' para datetime
+if not df.empty:
+    df["Data Coleta"] = pd.to_datetime(df["Data Coleta"], errors='coerce')
+    df_filtrado = df[(df["Data Coleta"].dt.year == ano_selecionado) & (df["Data Coleta"].dt.month == mes_selecionado)]
+else:
+    df_filtrado = df
+
+# Converter "Id Amostra" e "Ano" para inteiros sem separadores de milhares
+if not df_filtrado.empty:
+    df_filtrado["Id Amostra"] = df_filtrado["Id Amostra"].astype(int)
+    df_filtrado["Ano"] = df_filtrado["Data Coleta"].dt.year.astype(int)
+    df_filtrado = df_filtrado.drop(columns=["Ano"])
+    st.dataframe(df_filtrado.style.format({"Id Amostra": "{:d}", "Ano": "{:d}"}))
+else:
+    st.warning("Nenhum dado encontrado para o período selecionado.")
